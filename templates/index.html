@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Freight Demand Forecasting & Capacity Optimization</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: 'Segoe UI', system-ui, sans-serif;
+    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+    color: #f8fafc; display: flex; justify-content: center; align-items: center;
+    min-height: 100vh; padding: 24px;
+  }
+  .card {
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.16);
+    border-radius: 16px; padding: 28px 32px; width: 840px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+  }
+  .header { text-align: center; margin-bottom: 20px; }
+  .header h1 { margin: 0 0 6px 0; font-size: 22px; color: #fff; }
+  .header p { margin: 0; font-size: 13px; color: #cbd5e1; }
+  .form-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+  .field label { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 5px; font-weight: 600; }
+  .field input, .field select {
+    width: 100%; padding: 9px 10px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.2); background: rgba(15,23,42,0.85);
+    color: #fff; font-size: 13px;
+  }
+  .btn-row { text-align: center; }
+  .btn {
+    background: #10b981; color: #052e16; font-weight: 700; font-size: 14px;
+    padding: 10px 28px; border: none; border-radius: 8px; cursor: pointer;
+  }
+  .btn:hover { background: #34d399; }
+  .result-panel { display: none; margin-top: 22px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.16); }
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  .kpi {
+    background: rgba(15,23,42,0.65); border: 1px solid rgba(16,185,129,0.35);
+    border-radius: 10px; padding: 10px 12px; text-align: center;
+  }
+  .kpi-label { font-size: 11px; color: #94a3b8; margin-bottom: 4px; }
+  .kpi-val { font-size: 15px; font-weight: 700; color: #34d399; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; background: rgba(15,23,42,0.6); border-radius: 8px; overflow: hidden; }
+  th { background: rgba(30,58,95,0.9); color: #e2e8f0; padding: 8px 10px; text-align: left; }
+  td { padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,0.08); color: #f1f5f9; }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .badge-ok { background: rgba(16,185,129,0.22); color: #34d399; padding: 2px 7px; border-radius: 6px; font-weight: 700; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <h1>Maritime Freight Demand Forecasting & Capacity Optimization</h1>
+      <p>Live ML demand prediction and HiGHS minimum-cost vessel allocation</p>
+    </div>
+
+    <div class="form-grid">
+      <div class="field">
+        <label>Shipping Corridors</label>
+        <input type="text" value="All 5 Active Routes (R1-R5)" readonly>
+      </div>
+      <div class="field">
+        <label>Forecast Horizon</label>
+        <select id="horizon">
+          <option value="25">Month 25 (Next Month)</option>
+          <option value="26">Month 26 (+2 Months)</option>
+          <option value="27">Month 27 (+3 Months)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Fuel Price Index</label>
+        <input type="number" id="fuel" value="104.5" step="0.5">
+      </div>
+      <div class="field">
+        <label>Port Congestion Index</label>
+        <input type="number" id="congestion" value="0.24" step="0.01">
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn" onclick="runForecast()">Forecast & Optimize Capacity</button>
+    </div>
+
+    <div id="results" class="result-panel">
+      <div class="kpi-row">
+        <div class="kpi"><div class="kpi-label">Total Forecast</div><div class="kpi-val" id="k-dem"></div></div>
+        <div class="kpi"><div class="kpi-label">Allocated Capacity</div><div class="kpi-val" id="k-cap"></div></div>
+        <div class="kpi"><div class="kpi-label">Fleet Utilization</div><div class="kpi-val" id="k-util"></div></div>
+        <div class="kpi"><div class="kpi-label">Optimal Cost</div><div class="kpi-val" id="k-cost"></div></div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Shipping Route</th>
+            <th class="num">Forecast (TEU)</th>
+            <th class="num">Vessels (F/P/PP)</th>
+            <th class="num">Capacity (TEU)</th>
+            <th class="num">Utilization</th>
+            <th class="num">Est. Cost</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+async function runForecast() {
+  const payload = {
+    horizon: document.getElementById("horizon").value,
+    fuel: document.getElementById("fuel").value,
+    congestion: document.getElementById("congestion").value
+  };
+  const res = await fetch("/api/forecast", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const d = await res.json();
+
+  document.getElementById("k-dem").textContent = d.total_demand_teu.toLocaleString() + " TEU";
+  document.getElementById("k-cap").textContent = d.total_allocated_teu.toLocaleString() + " TEU";
+  document.getElementById("k-util").textContent = d.overall_utilization_pct + "%";
+  document.getElementById("k-cost").textContent = "$" + d.total_cost_usd.toLocaleString();
+
+  document.getElementById("tbody").innerHTML = d.allocations.map(r => `
+    <tr>
+      <td>${r.route_id}: ${r.route_name}</td>
+      <td class="num">${r.forecast_teu.toLocaleString()}</td>
+      <td class="num">${r.vessels}</td>
+      <td class="num">${r.allocated_cap_teu.toLocaleString()}</td>
+      <td class="num"><span class="badge-ok">${r.utilization_pct}%</span></td>
+      <td class="num">$${r.est_cost_usd.toLocaleString()}</td>
+    </tr>
+  `).join("");
+  document.getElementById("results").style.display = "block";
+}
+</script>
+</body>
+</html>
